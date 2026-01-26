@@ -15,6 +15,8 @@ from telegram.ext import (
     ContextTypes,
     filters
 )
+from threading import Thread
+from http.server import HTTPServer, BaseHTTPRequestHandler
 import database
 
 # Настройка логирования
@@ -27,6 +29,25 @@ logger = logging.getLogger(__name__)
 # Константы
 VALORANT_NICK, RANK, ROLES = range(3)
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
+PORT = int(os.environ.get('PORT', 10000))  # Render использует переменную PORT
+
+# Простой HTTP сервер для health checks
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'text/plain')
+        self.end_headers()
+        self.wfile.write(b'Bot is running!')
+    
+    def log_message(self, format, *args):
+        # Отключаем логирование HTTP запросов
+        pass
+
+def run_http_server():
+    """Запуск HTTP сервера в отдельном потоке"""
+    server = HTTPServer(('0.0.0.0', PORT), HealthCheckHandler)
+    logger.info(f"HTTP server started on port {PORT}")
+    server.serve_forever()
 
 # Клавиатуры
 def get_main_menu_keyboard():
@@ -314,6 +335,10 @@ def main():
         logger.error("BOT_TOKEN не установлен!")
         return
     
+    # Запуск HTTP сервера в отдельном потоке (для Render health checks)
+    http_thread = Thread(target=run_http_server, daemon=True)
+    http_thread.start()
+    
     application = Application.builder().token(BOT_TOKEN).build()
     
     # ConversationHandler
@@ -350,4 +375,5 @@ def main():
 
 
 if __name__ == '__main__':
+    main()
     main()
