@@ -333,10 +333,17 @@ def main():
     application.add_handler(conv_handler)
     application.add_handler(CallbackQueryHandler(handle_callback))
     
-    # Ежедневная рассылка
-    job_queue = application.job_queue
-    job_queue.run_daily(send_daily_notification, time=time(10, 0, 0))
-    job_queue.run_daily(send_daily_notification, time=time(18, 0, 0))
+    # Ежедневная рассылка (если доступен job_queue)
+    try:
+        job_queue = application.job_queue
+        if job_queue:
+            job_queue.run_daily(send_daily_notification, time=time(10, 0, 0))
+            job_queue.run_daily(send_daily_notification, time=time(18, 0, 0))
+            logger.info("Ежедневные уведомления настроены на 10:00 и 18:00")
+        else:
+            logger.warning("JobQueue недоступен. Ежедневные уведомления отключены.")
+    except Exception as e:
+        logger.warning(f"Не удалось настроить ежедневные уведомления: {e}")
     
     logger.info("Бот запущен!")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
