@@ -80,7 +80,7 @@ def get_main_menu_keyboard():
     keyboard = [
         [InlineKeyboardButton("🎮 Буду играть сегодня", callback_data="play_today_slots")],
         [InlineKeyboardButton("📝 Изменить план на сегодня", callback_data="change_plan")],
-        [InlineKeyboardButton("👥 Кто играет сегодня?", url="https://valorant-team-finder-1.vercel.app")],
+        [InlineKeyboardButton("👥 Кто играет сегодня?", url="https://valorant-team-finder-ten.vercel.app/")],
         [InlineKeyboardButton("⚙️ Изменить данные", callback_data="edit_profile")],
     ]
     return InlineKeyboardMarkup(keyboard)
