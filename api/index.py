@@ -5,7 +5,7 @@ from http.server import BaseHTTPRequestHandler
 import os
 import json
 from datetime import datetime
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 
 # Supabase credentials
 SUPABASE_URL = os.environ.get('SUPABASE_URL', '')
@@ -48,6 +48,7 @@ class handler(BaseHTTPRequestHandler):
         # Parse path
         parsed = urlparse(self.path)
         path = parsed.path
+        query = parse_qs(parsed.query)
         
         # Check Supabase connection
         if not supabase_client:
@@ -66,6 +67,10 @@ class handler(BaseHTTPRequestHandler):
                 self._handle_stats()
             elif 'players/today' in path or path.endswith('/today'):
                 self._handle_players_today()
+            elif 'players/timeslot' in path:
+                # Новый endpoint для фильтрации по временному слоту
+                timeslot = query.get('slot', [''])[0]
+                self._handle_players_by_timeslot(timeslot)
             else:
                 self._send_json({
                     'success': False,
@@ -119,14 +124,55 @@ class handler(BaseHTTPRequestHandler):
                 'error_type': type(e).__name__
             }, 500)
     
+    def _handle_players_by_timeslot(self, timeslot):
+        """Get players by specific timeslot"""
+        try:
+            today = datetime.now().date().isoformat()
+            
+            if not timeslot or timeslot not in ['morning', 'day', 'evening', 'night']:
+                return self._send_json({
+                    'success': False,
+                    'error': 'Invalid timeslot. Must be: morning, day, evening, or night'
+                }, 400)
+            
+            # Query with timeslot filter
+            response = supabase_client.table('daily_status')\
+                .select('telegram_id, time_slots, players(*)')\
+                .eq('date', today)\
+                .eq('is_playing', True)\
+                .contains('time_slots', [timeslot])\
+                .execute()
+            
+            players = []
+            if response.data:
+                for item in response.data:
+                    if item.get('players'):
+                        player_data = item['players'].copy()
+                        player_data['time_slots'] = item.get('time_slots', [])
+                        players.append(player_data)
+            
+            self._send_json({
+                'success': True,
+                'date': today,
+                'timeslot': timeslot,
+                'count': len(players),
+                'players': players
+            })
+        except Exception as e:
+            self._send_json({
+                'success': False,
+                'error': str(e),
+                'error_type': type(e).__name__
+            }, 500)
+    
     def _handle_players_today(self):
-        """Get players playing today"""
+        """Get players playing today with time slots"""
         try:
             today = datetime.now().date().isoformat()
             
             # Query with join
             response = supabase_client.table('daily_status')\
-                .select('telegram_id, players(*)')\
+                .select('telegram_id, time_slots, players(*)')\
                 .eq('date', today)\
                 .eq('is_playing', True)\
                 .execute()
@@ -135,7 +181,9 @@ class handler(BaseHTTPRequestHandler):
             if response.data:
                 for item in response.data:
                     if item.get('players'):
-                        players.append(item['players'])
+                        player_data = item['players'].copy()
+                        player_data['time_slots'] = item.get('time_slots', [])
+                        players.append(player_data)
             
             self._send_json({
                 'success': True,

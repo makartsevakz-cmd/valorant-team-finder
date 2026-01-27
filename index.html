@@ -470,6 +470,13 @@
                 'controller': '💨 Контроллер'
             };
 
+            const timeSlotNames = {
+                'morning': '🌅 Утро',
+                'day': '☀️ День',
+                'evening': '🌆 Вечер',
+                'night': '🌙 Ночь'
+            };
+
             playersContainer.innerHTML = players.map(player => {
                 const rolesHTML = player.roles.map(role => {
                     const roleName = roleNames[role] || role;
@@ -479,6 +486,15 @@
                 const telegramLink = player.telegram_username 
                     ? `<a href="https://t.me/${player.telegram_username}" class="telegram-username" target="_blank">@${player.telegram_username}</a>`
                     : `<span class="info-value">${player.telegram_first_name}</span>`;
+
+                // Отображение временных слотов (если есть)
+                const timeSlotsHTML = player.time_slots && player.time_slots.length > 0 
+                    ? `<div class="info-row">
+                        <span class="info-icon">⏰</span>
+                        <span class="info-label">Время:</span>
+                        <span class="info-value">${player.time_slots.map(slot => timeSlotNames[slot] || slot).join(', ')}</span>
+                    </div>`
+                    : '';
 
                 return `
                     <div class="player-card">
@@ -492,6 +508,7 @@
                                 <span class="info-label">Telegram:</span>
                                 ${telegramLink}
                             </div>
+                            ${timeSlotsHTML}
                             <div class="roles-container">
                                 <div class="roles-label">Роли:</div>
                                 <div class="roles-tags">
