@@ -1,0 +1,11 @@
+# Минимальные зависимости для работы бота
+# Если основной requirements.txt не работает, используйте этот файл
+
+# Telegram Bot
+python-telegram-bot[job-queue]
+
+# Supabase
+supabase
+
+# HTTP клиент (нужен для supabase)
+httpx

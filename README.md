@@ -37,10 +37,15 @@ valorant-team-finder/
 ├── api/                   # API для веб-приложения
 │   ├── index.py          # Vercel serverless function
 │   └── requirements.txt  # Зависимости
-├── public/               # Веб-приложение
-│   └── index.html       # Главная страница
+├── public/               # Старая папка (можно удалить)
+│   └── index.html       
+├── index.html           # Главная страница (в корне!)
 ├── vercel.json          # Конфигурация Vercel
-└── DEPLOY_GUIDE.md      # Подробная инструкция
+├── nixpacks.toml        # Конфигурация Railway (билд)
+├── Procfile             # Команда запуска для Railway
+├── runtime.txt          # Версия Python
+├── DEPLOY_GUIDE.md      # Подробная инструкция
+└── QUICK_FIX.md         # Быстрые решения проблем
 ```
 
 ## 🎯 Как это работает

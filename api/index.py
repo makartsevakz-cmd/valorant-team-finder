@@ -1,10 +1,10 @@
-from flask import Flask, jsonify, request
-from flask_cors import CORS
+"""
+Vercel Serverless Function - Simple WSGI approach
+"""
 import os
+import json
 from datetime import datetime
-
-app = Flask(__name__)
-CORS(app)
+from http import HTTPStatus
 
 # Supabase credentials
 SUPABASE_URL = os.environ.get('SUPABASE_URL', '')
@@ -17,30 +17,43 @@ if SUPABASE_URL and SUPABASE_KEY:
         from supabase import create_client
         supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
     except Exception as e:
-        print(f"Supabase init error: {e}")
+        print(f"Supabase initialization error: {e}")
 
 
-@app.route('/api/health')
-def health():
+def get_response(status_code, data):
+    """Helper to create response"""
+    return {
+        'statusCode': status_code,
+        'headers': {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type',
+        },
+        'body': json.dumps(data)
+    }
+
+
+def handle_health(environ):
     """Health check endpoint"""
-    return jsonify({
+    return get_response(HTTPStatus.OK, {
         'success': True,
         'status': 'healthy',
         'timestamp': datetime.now().isoformat(),
         'supabase_connected': bool(supabase_client),
         'has_url': bool(SUPABASE_URL),
-        'has_key': bool(SUPABASE_KEY)
+        'has_key': bool(SUPABASE_KEY),
+        'url_preview': SUPABASE_URL[:30] + '...' if len(SUPABASE_URL) > 30 else SUPABASE_URL
     })
 
 
-@app.route('/api/stats')
-def stats():
+def handle_stats(environ):
     """Get statistics"""
     if not supabase_client:
-        return jsonify({
+        return get_response(HTTPStatus.INTERNAL_SERVER_ERROR, {
             'success': False,
             'error': 'Database not configured'
-        }), 500
+        })
     
     try:
         today = datetime.now().date().isoformat()
@@ -57,27 +70,27 @@ def stats():
             .execute()
         playing_today = len(playing_response.data) if playing_response.data else 0
         
-        return jsonify({
+        return get_response(HTTPStatus.OK, {
             'success': True,
             'total_players': total_players,
             'playing_today': playing_today,
             'date': today
         })
     except Exception as e:
-        return jsonify({
+        return get_response(HTTPStatus.INTERNAL_SERVER_ERROR, {
             'success': False,
-            'error': str(e)
-        }), 500
+            'error': str(e),
+            'error_type': type(e).__name__
+        })
 
 
-@app.route('/api/players/today')
-def players_today():
+def handle_players_today(environ):
     """Get players playing today"""
     if not supabase_client:
-        return jsonify({
+        return get_response(HTTPStatus.INTERNAL_SERVER_ERROR, {
             'success': False,
             'error': 'Database not configured'
-        }), 500
+        })
     
     try:
         today = datetime.now().date().isoformat()
@@ -95,20 +108,66 @@ def players_today():
                 if item.get('players'):
                     players.append(item['players'])
         
-        return jsonify({
+        return get_response(HTTPStatus.OK, {
             'success': True,
             'date': today,
             'count': len(players),
             'players': players
         })
     except Exception as e:
-        return jsonify({
+        return get_response(HTTPStatus.INTERNAL_SERVER_ERROR, {
             'success': False,
-            'error': str(e)
-        }), 500
+            'error': str(e),
+            'error_type': type(e).__name__
+        })
 
 
-# For Vercel
-def handler(request, response):
-    with app.request_context(request.environ):
-        return app.full_dispatch_request()
+def application(environ, start_response):
+    """WSGI application"""
+    
+    # Get request path
+    path = environ.get('PATH_INFO', '/')
+    method = environ.get('REQUEST_METHOD', 'GET')
+    
+    # Handle OPTIONS (CORS preflight)
+    if method == 'OPTIONS':
+        response = get_response(HTTPStatus.OK, {})
+        start_response(
+            f"{response['statusCode']} OK",
+            [(k, v) for k, v in response['headers'].items()]
+        )
+        return [response['body'].encode()]
+    
+    # Route handling
+    try:
+        if 'health' in path:
+            response = handle_health(environ)
+        elif 'stats' in path:
+            response = handle_stats(environ)
+        elif 'players/today' in path or path.endswith('/today'):
+            response = handle_players_today(environ)
+        else:
+            response = get_response(HTTPStatus.NOT_FOUND, {
+                'success': False,
+                'error': 'Endpoint not found',
+                'path': path
+            })
+    except Exception as e:
+        response = get_response(HTTPStatus.INTERNAL_SERVER_ERROR, {
+            'success': False,
+            'error': f'Unexpected error: {str(e)}',
+            'error_type': type(e).__name__
+        })
+    
+    # Send response
+    status_text = f"{response['statusCode']} {HTTPStatus(response['statusCode']).phrase}"
+    headers = [(k, v) for k, v in response['headers'].items()]
+    
+    start_response(status_text, headers)
+    return [response['body'].encode()]
+
+
+# Vercel serverless function entry point
+def handler(environ, start_response):
+    """Entry point for Vercel"""
+    return application(environ, start_response)
