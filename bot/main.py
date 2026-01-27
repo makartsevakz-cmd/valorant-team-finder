@@ -104,7 +104,9 @@ def get_time_slots_keyboard(selected_slots=None):
     if selected_slots:
         keyboard.append([InlineKeyboardButton("✅ Подтвердить выбор", callback_data="confirm_slots")])
     
-    keyboard.append([InlineKeyboardButton("❌ Отмена", callback_data="cancel_slots")])
+    # Кнопка "Не буду играть"
+    keyboard.append([InlineKeyboardButton("❌ Не буду играть сегодня", callback_data="not_playing")])
+    keyboard.append([InlineKeyboardButton("🔙 Отмена", callback_data="cancel_slots")])
     
     return InlineKeyboardMarkup(keyboard)
 
@@ -165,7 +167,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def get_valorant_nick(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Получение игрового ника"""
+    """Получение игрового ника (регистрация)"""
     nick = update.message.text.strip()
     
     if len(nick) < 2 or len(nick) > 30:
@@ -184,8 +186,17 @@ async def get_valorant_nick(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return RANK
 
 
+async def handle_nick_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка ввода ника (может быть регистрация или редактирование)"""
+    # Проверяем режим
+    if context.user_data.get('editing') == 'nick':
+        return await save_edited_nick(update, context)
+    else:
+        return await get_valorant_nick(update, context)
+
+
 async def get_rank(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Получение ранга"""
+    """Получение ранга (регистрация)"""
     query = update.callback_query
     await query.answer()
     
@@ -199,6 +210,15 @@ async def get_rank(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=get_roles_keyboard()
     )
     return ROLES
+
+
+async def handle_rank_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка выбора ранга (может быть регистрация или редактирование)"""
+    # Проверяем режим
+    if context.user_data.get('editing') == 'rank':
+        return await save_edited_rank(update, context)
+    else:
+        return await get_rank(update, context)
 
 
 async def get_roles(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -375,6 +395,31 @@ async def confirm_slots(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def not_playing_today(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Пользователь не будет играть сегодня"""
+    query = update.callback_query
+    await query.answer()
+    
+    user = update.effective_user
+    telegram_id = user.id
+    today = datetime.now().date().isoformat()
+    
+    # Удаляем или помечаем как не играющий
+    success = database.update_daily_status(telegram_id, today, False, [])
+    
+    if success:
+        await query.edit_message_text(
+            "✅ Понял! Сегодня ты не будешь играть.\n\n"
+            "Твой статус обновлён.",
+            reply_markup=get_main_menu_keyboard()
+        )
+    else:
+        await query.edit_message_text(
+            "❌ Ошибка при обновлении статуса. Попробуй еще раз.",
+            reply_markup=get_main_menu_keyboard()
+        )
+
+
 async def cancel_slots(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Отмена выбора слотов"""
     query = update.callback_query
@@ -426,21 +471,246 @@ async def change_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ======================
 
 async def edit_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Редактирование профиля"""
+    """Меню редактирования профиля"""
+    query = update.callback_query
+    await query.answer()
+    
+    user = update.effective_user
+    telegram_id = user.id
+    player = database.get_player(telegram_id)
+    
+    if not player:
+        await query.edit_message_text(
+            "❌ Профиль не найден. Начните регистрацию: /start"
+        )
+        return
+    
+    keyboard = [
+        [InlineKeyboardButton("🎮 Изменить игровой ник", callback_data="edit_nick")],
+        [InlineKeyboardButton("📊 Изменить ранг", callback_data="edit_rank")],
+        [InlineKeyboardButton("🎯 Изменить роли", callback_data="edit_roles")],
+        [InlineKeyboardButton("🔙 Назад в меню", callback_data="back_to_menu")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text(
+        f"⚙️ Редактирование профиля\n\n"
+        f"🎮 Ник: {player['valorant_nick']}\n"
+        f"📊 Ранг: {player['rank']}\n"
+        f"🎯 Роли: {', '.join(player['roles'])}\n\n"
+        "Что хочешь изменить?",
+        reply_markup=reply_markup
+    )
+
+
+async def edit_nick_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Начало изменения ника"""
     query = update.callback_query
     await query.answer()
     
     await query.edit_message_text(
-        "⚙️ Редактирование профиля\n\n"
-        "Начни заново регистрацию командой /start\n"
-        "Твои старые данные будут заменены новыми."
+        "🎮 Изменение игрового ника\n\n"
+        "Введи новый ник в VALORANT:"
     )
+    context.user_data['editing'] = 'nick'
+    return VALORANT_NICK
+
+
+async def edit_rank_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Начало изменения ранга"""
+    query = update.callback_query
+    await query.answer()
+    
+    await query.edit_message_text(
+        "📊 Изменение ранга\n\n"
+        "Выбери новый ранг:",
+        reply_markup=get_rank_keyboard()
+    )
+    context.user_data['editing'] = 'rank'
+
+
+async def edit_roles_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Начало изменения ролей"""
+    query = update.callback_query
+    await query.answer()
+    
+    user = update.effective_user
+    telegram_id = user.id
+    player = database.get_player(telegram_id)
+    
+    # Инициализируем текущие роли
+    context.user_data['roles'] = player['roles'].copy()
+    context.user_data['editing'] = 'roles'
+    
+    # Создаем клавиатуру с отметками текущих ролей
+    roles_dict = {
+        "duelist": "💨 Дуэлист",
+        "sentinel": "🛡 Страж",
+        "initiator": "⚡ Инициатор",
+        "controller": "🎯 Контроллер"
+    }
+    
+    keyboard = []
+    for role_id, role_name in roles_dict.items():
+        prefix = "✅ " if role_id in context.user_data['roles'] else ""
+        keyboard.append([InlineKeyboardButton(
+            f"{prefix}{role_name}",
+            callback_data=f"role_{role_id}"
+        )])
+    
+    if context.user_data['roles']:
+        keyboard.append([InlineKeyboardButton("✅ Сохранить", callback_data="save_roles")])
+    keyboard.append([InlineKeyboardButton("❌ Отмена", callback_data="edit_profile")])
+    
+    await query.edit_message_text(
+        f"🎯 Изменение ролей\n\n"
+        f"Выбери роли (сейчас выбрано: {len(context.user_data['roles'])}):",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+
+async def save_edited_nick(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Сохранение нового ника"""
+    user = update.effective_user
+    telegram_id = user.id
+    new_nick = update.message.text.strip()
+    
+    if len(new_nick) < 2 or len(new_nick) > 30:
+        await update.message.reply_text(
+            "❌ Ник должен быть от 2 до 30 символов. Попробуй еще раз:"
+        )
+        return VALORANT_NICK
+    
+    # Получаем текущий профиль
+    player = database.get_player(telegram_id)
+    if not player:
+        await update.message.reply_text(
+            "❌ Ошибка. Начни заново: /start"
+        )
+        return ConversationHandler.END
+    
+    # Сохраняем с новым ником
+    success = database.save_player(telegram_id, new_nick, player['rank'], player['roles'])
+    
+    if success:
+        await update.message.reply_text(
+            f"✅ Ник изменён на: {new_nick}",
+            reply_markup=get_main_menu_keyboard()
+        )
+    else:
+        await update.message.reply_text(
+            "❌ Ошибка при сохранении. Попробуй еще раз: /start"
+        )
+    
+    context.user_data.pop('editing', None)
+    return ConversationHandler.END
+
+
+async def save_edited_rank(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Сохранение нового ранга"""
+    query = update.callback_query
+    await query.answer()
+    
+    user = update.effective_user
+    telegram_id = user.id
+    new_rank = query.data.replace("rank_", "")
+    
+    # Получаем текущий профиль
+    player = database.get_player(telegram_id)
+    if not player:
+        await query.edit_message_text(
+            "❌ Ошибка. Начни заново: /start"
+        )
+        return ConversationHandler.END
+    
+    # Сохраняем с новым рангом
+    success = database.save_player(telegram_id, player['valorant_nick'], new_rank, player['roles'])
+    
+    if success:
+        await query.edit_message_text(
+            f"✅ Ранг изменён на: {new_rank}",
+            reply_markup=get_main_menu_keyboard()
+        )
+    else:
+        await query.edit_message_text(
+            "❌ Ошибка при сохранении. Попробуй еще раз: /start"
+        )
+    
+    context.user_data.pop('editing', None)
+    return ConversationHandler.END
+
+
+async def save_edited_roles(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Сохранение новых ролей"""
+    query = update.callback_query
+    await query.answer()
+    
+    user = update.effective_user
+    telegram_id = user.id
+    new_roles = context.user_data.get('roles', [])
+    
+    if not new_roles:
+        await query.answer("❌ Нужно выбрать хотя бы одну роль!", show_alert=True)
+        return
+    
+    # Получаем текущий профиль
+    player = database.get_player(telegram_id)
+    if not player:
+        await query.edit_message_text(
+            "❌ Ошибка. Начни заново: /start"
+        )
+        return ConversationHandler.END
+    
+    # Сохраняем с новыми ролями
+    success = database.save_player(telegram_id, player['valorant_nick'], player['rank'], new_roles)
+    
+    if success:
+        await query.edit_message_text(
+            f"✅ Роли изменены: {', '.join(new_roles)}",
+            reply_markup=get_main_menu_keyboard()
+        )
+    else:
+        await query.edit_message_text(
+            "❌ Ошибка при сохранении. Попробуй еще раз: /start"
+        )
+    
+    context.user_data.pop('editing', None)
+    context.user_data.pop('roles', None)
+    return ConversationHandler.END
+
+
+async def back_to_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Возврат в главное меню"""
+    query = update.callback_query
+    await query.answer()
+    
+    user = update.effective_user
+    telegram_id = user.id
+    player = database.get_player(telegram_id)
+    
+    if player:
+        await query.edit_message_text(
+            f"👋 Привет, {player['valorant_nick']}!\n\n"
+            f"📊 Твой ранг: {player['rank']}\n"
+            f"🎯 Роли: {', '.join(player['roles'])}\n\n"
+            "Что хочешь сделать?",
+            reply_markup=get_main_menu_keyboard()
+        )
+    else:
+        await query.edit_message_text(
+            "❌ Профиль не найден. Начни заново: /start"
+        )
+    
+    return ConversationHandler.END
 
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик callback кнопок"""
     query = update.callback_query
     data = query.data
+    
+    # Проверяем контекст редактирования
+    editing = context.user_data.get('editing')
     
     if data == "play_today_slots":
         await play_today_slots(update, context)
@@ -450,10 +720,66 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await confirm_slots(update, context)
     elif data == "cancel_slots":
         await cancel_slots(update, context)
+    elif data == "not_playing":
+        await not_playing_today(update, context)
     elif data == "change_plan":
         await change_plan(update, context)
     elif data == "edit_profile":
         await edit_profile(update, context)
+    elif data == "edit_nick":
+        await edit_nick_start(update, context)
+        return VALORANT_NICK
+    elif data == "edit_rank":
+        await edit_rank_start(update, context)
+    elif data.startswith("rank_") and editing == 'rank':
+        await save_edited_rank(update, context)
+        return ConversationHandler.END
+    elif data == "edit_roles":
+        await edit_roles_start(update, context)
+    elif data.startswith("role_") and editing == 'roles':
+        # Переключаем роль в режиме редактирования
+        role = data.replace("role_", "")
+        roles = context.user_data.get('roles', [])
+        
+        if role in roles:
+            roles.remove(role)
+        else:
+            roles.append(role)
+        
+        context.user_data['roles'] = roles
+        
+        # Обновляем клавиатуру
+        roles_dict = {
+            "duelist": "💨 Дуэлист",
+            "sentinel": "🛡 Страж",
+            "initiator": "⚡ Инициатор",
+            "controller": "🎯 Контроллер"
+        }
+        
+        keyboard = []
+        for role_id, role_name in roles_dict.items():
+            prefix = "✅ " if role_id in roles else ""
+            keyboard.append([InlineKeyboardButton(
+                f"{prefix}{role_name}",
+                callback_data=f"role_{role_id}"
+            )])
+        
+        if roles:
+            keyboard.append([InlineKeyboardButton("✅ Сохранить", callback_data="save_roles")])
+        keyboard.append([InlineKeyboardButton("❌ Отмена", callback_data="edit_profile")])
+        
+        await query.edit_message_text(
+            f"🎯 Изменение ролей\n\n"
+            f"Выбери роли (сейчас выбрано: {len(roles)}):",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        await query.answer()
+    elif data == "save_roles":
+        await save_edited_roles(update, context)
+        return ConversationHandler.END
+    elif data == "back_to_menu":
+        await back_to_menu(update, context)
+        return ConversationHandler.END
     else:
         await query.answer("⚠️ Неизвестная команда")
 
@@ -507,18 +833,32 @@ def main():
     
     application = Application.builder().token(BOT_TOKEN).build()
     
-    # Conversation handler для регистрации
+    # Conversation handler для регистрации и редактирования
     conv_handler = ConversationHandler(
-        entry_points=[CommandHandler('start', start)],
+        entry_points=[
+            CommandHandler('start', start),
+            CallbackQueryHandler(edit_nick_start, pattern="^edit_nick$"),
+            CallbackQueryHandler(edit_rank_start, pattern="^edit_rank$"),
+            CallbackQueryHandler(edit_roles_start, pattern="^edit_roles$"),
+        ],
         states={
-            VALORANT_NICK: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_valorant_nick)],
-            RANK: [CallbackQueryHandler(get_rank, pattern="^rank_")],
+            VALORANT_NICK: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_nick_input),
+            ],
+            RANK: [
+                CallbackQueryHandler(handle_rank_callback, pattern="^rank_"),
+            ],
             ROLES: [
                 CallbackQueryHandler(get_roles, pattern="^role_"),
-                CallbackQueryHandler(finish_registration, pattern="^roles_done$")
+                CallbackQueryHandler(finish_registration, pattern="^roles_done$"),
+                CallbackQueryHandler(save_edited_roles, pattern="^save_roles$"),
             ],
         },
-        fallbacks=[CommandHandler('cancel', cancel)],
+        fallbacks=[
+            CommandHandler('cancel', cancel),
+            CallbackQueryHandler(back_to_menu, pattern="^back_to_menu$"),
+            CallbackQueryHandler(edit_profile, pattern="^edit_profile$"),
+        ],
         per_message=False
     )
     
