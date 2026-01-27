@@ -1,10 +1,11 @@
 """
-Vercel Serverless Function - Simple WSGI approach
+Vercel Serverless Function - Native Handler Format
 """
+from http.server import BaseHTTPRequestHandler
 import os
 import json
 from datetime import datetime
-from http import HTTPStatus
+from urllib.parse import urlparse
 
 # Supabase credentials
 SUPABASE_URL = os.environ.get('SUPABASE_URL', '')
@@ -20,154 +21,131 @@ if SUPABASE_URL and SUPABASE_KEY:
         print(f"Supabase initialization error: {e}")
 
 
-def get_response(status_code, data):
-    """Helper to create response"""
-    return {
-        'statusCode': status_code,
-        'headers': {
-            'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-            'Access-Control-Allow-Headers': 'Content-Type',
-        },
-        'body': json.dumps(data)
-    }
-
-
-def handle_health(environ):
-    """Health check endpoint"""
-    return get_response(HTTPStatus.OK, {
-        'success': True,
-        'status': 'healthy',
-        'timestamp': datetime.now().isoformat(),
-        'supabase_connected': bool(supabase_client),
-        'has_url': bool(SUPABASE_URL),
-        'has_key': bool(SUPABASE_KEY),
-        'url_preview': SUPABASE_URL[:30] + '...' if len(SUPABASE_URL) > 30 else SUPABASE_URL
-    })
-
-
-def handle_stats(environ):
-    """Get statistics"""
-    if not supabase_client:
-        return get_response(HTTPStatus.INTERNAL_SERVER_ERROR, {
-            'success': False,
-            'error': 'Database not configured'
-        })
+class handler(BaseHTTPRequestHandler):
+    """Vercel handler class"""
     
-    try:
-        today = datetime.now().date().isoformat()
-        
-        # Total players
-        total_response = supabase_client.table('players').select('telegram_id').execute()
-        total_players = len(total_response.data) if total_response.data else 0
-        
-        # Playing today
-        playing_response = supabase_client.table('daily_status')\
-            .select('telegram_id')\
-            .eq('date', today)\
-            .eq('is_playing', True)\
-            .execute()
-        playing_today = len(playing_response.data) if playing_response.data else 0
-        
-        return get_response(HTTPStatus.OK, {
-            'success': True,
-            'total_players': total_players,
-            'playing_today': playing_today,
-            'date': today
-        })
-    except Exception as e:
-        return get_response(HTTPStatus.INTERNAL_SERVER_ERROR, {
-            'success': False,
-            'error': str(e),
-            'error_type': type(e).__name__
-        })
-
-
-def handle_players_today(environ):
-    """Get players playing today"""
-    if not supabase_client:
-        return get_response(HTTPStatus.INTERNAL_SERVER_ERROR, {
-            'success': False,
-            'error': 'Database not configured'
-        })
+    def _set_headers(self, status=200):
+        """Set response headers"""
+        self.send_response(status)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.end_headers()
     
-    try:
-        today = datetime.now().date().isoformat()
-        
-        # Query with join
-        response = supabase_client.table('daily_status')\
-            .select('telegram_id, players(*)')\
-            .eq('date', today)\
-            .eq('is_playing', True)\
-            .execute()
-        
-        players = []
-        if response.data:
-            for item in response.data:
-                if item.get('players'):
-                    players.append(item['players'])
-        
-        return get_response(HTTPStatus.OK, {
-            'success': True,
-            'date': today,
-            'count': len(players),
-            'players': players
-        })
-    except Exception as e:
-        return get_response(HTTPStatus.INTERNAL_SERVER_ERROR, {
-            'success': False,
-            'error': str(e),
-            'error_type': type(e).__name__
-        })
-
-
-def application(environ, start_response):
-    """WSGI application"""
+    def _send_json(self, data, status=200):
+        """Send JSON response"""
+        self._set_headers(status)
+        self.wfile.write(json.dumps(data).encode())
     
-    # Get request path
-    path = environ.get('PATH_INFO', '/')
-    method = environ.get('REQUEST_METHOD', 'GET')
+    def do_OPTIONS(self):
+        """Handle CORS preflight"""
+        self._set_headers(200)
     
-    # Handle OPTIONS (CORS preflight)
-    if method == 'OPTIONS':
-        response = get_response(HTTPStatus.OK, {})
-        start_response(
-            f"{response['statusCode']} OK",
-            [(k, v) for k, v in response['headers'].items()]
-        )
-        return [response['body'].encode()]
-    
-    # Route handling
-    try:
-        if 'health' in path:
-            response = handle_health(environ)
-        elif 'stats' in path:
-            response = handle_stats(environ)
-        elif 'players/today' in path or path.endswith('/today'):
-            response = handle_players_today(environ)
-        else:
-            response = get_response(HTTPStatus.NOT_FOUND, {
+    def do_GET(self):
+        """Handle GET requests"""
+        
+        # Parse path
+        parsed = urlparse(self.path)
+        path = parsed.path
+        
+        # Check Supabase connection
+        if not supabase_client:
+            return self._send_json({
                 'success': False,
-                'error': 'Endpoint not found',
-                'path': path
-            })
-    except Exception as e:
-        response = get_response(HTTPStatus.INTERNAL_SERVER_ERROR, {
-            'success': False,
-            'error': f'Unexpected error: {str(e)}',
-            'error_type': type(e).__name__
+                'error': 'Database not configured',
+                'has_url': bool(SUPABASE_URL),
+                'has_key': bool(SUPABASE_KEY)
+            }, 500)
+        
+        try:
+            # Route to appropriate handler
+            if 'health' in path:
+                self._handle_health()
+            elif 'stats' in path:
+                self._handle_stats()
+            elif 'players/today' in path or path.endswith('/today'):
+                self._handle_players_today()
+            else:
+                self._send_json({
+                    'success': False,
+                    'error': 'Endpoint not found',
+                    'path': path
+                }, 404)
+        except Exception as e:
+            self._send_json({
+                'success': False,
+                'error': str(e),
+                'error_type': type(e).__name__
+            }, 500)
+    
+    def _handle_health(self):
+        """Health check endpoint"""
+        self._send_json({
+            'success': True,
+            'status': 'healthy',
+            'timestamp': datetime.now().isoformat(),
+            'supabase_connected': bool(supabase_client),
+            'url_preview': SUPABASE_URL[:30] + '...' if len(SUPABASE_URL) > 30 else SUPABASE_URL
         })
     
-    # Send response
-    status_text = f"{response['statusCode']} {HTTPStatus(response['statusCode']).phrase}"
-    headers = [(k, v) for k, v in response['headers'].items()]
+    def _handle_stats(self):
+        """Get statistics"""
+        try:
+            today = datetime.now().date().isoformat()
+            
+            # Total players
+            total_response = supabase_client.table('players').select('telegram_id').execute()
+            total_players = len(total_response.data) if total_response.data else 0
+            
+            # Playing today
+            playing_response = supabase_client.table('daily_status')\
+                .select('telegram_id')\
+                .eq('date', today)\
+                .eq('is_playing', True)\
+                .execute()
+            playing_today = len(playing_response.data) if playing_response.data else 0
+            
+            self._send_json({
+                'success': True,
+                'total_players': total_players,
+                'playing_today': playing_today,
+                'date': today
+            })
+        except Exception as e:
+            self._send_json({
+                'success': False,
+                'error': str(e),
+                'error_type': type(e).__name__
+            }, 500)
     
-    start_response(status_text, headers)
-    return [response['body'].encode()]
-
-
-# Vercel serverless function entry point
-def handler(environ, start_response):
-    """Entry point for Vercel"""
-    return application(environ, start_response)
+    def _handle_players_today(self):
+        """Get players playing today"""
+        try:
+            today = datetime.now().date().isoformat()
+            
+            # Query with join
+            response = supabase_client.table('daily_status')\
+                .select('telegram_id, players(*)')\
+                .eq('date', today)\
+                .eq('is_playing', True)\
+                .execute()
+            
+            players = []
+            if response.data:
+                for item in response.data:
+                    if item.get('players'):
+                        players.append(item['players'])
+            
+            self._send_json({
+                'success': True,
+                'date': today,
+                'count': len(players),
+                'players': players
+            })
+        except Exception as e:
+            self._send_json({
+                'success': False,
+                'error': str(e),
+                'error_type': type(e).__name__
+            }, 500)
