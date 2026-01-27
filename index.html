@@ -357,7 +357,7 @@
         <div class="header">
             <h1>🎮 VALORANT Team Finder</h1>
             <p>Координация игроков PS5 & Xbox</p>
-            <a href="https://t.me/YOUR_BOT_USERNAME" class="telegram-link" target="_blank" id="botLink">
+            <a href="https://t.me/valorant_team_finder_bot" class="telegram-link" target="_blank" id="botLink">
                 📱 Открыть Telegram бота
             </a>
         </div>
@@ -483,18 +483,36 @@
                     return `<span class="role-tag">${roleName}</span>`;
                 }).join('');
 
-                const telegramLink = player.telegram_username 
-                    ? `<a href="https://t.me/${player.telegram_username}" class="telegram-username" target="_blank">@${player.telegram_username}</a>`
-                    : `<span class="info-value">${player.telegram_first_name}</span>`;
+                // Улучшенное отображение контакта Telegram
+                let telegramContact = '';
+                if (player.telegram_username) {
+                    // Если есть username - показываем @username как ссылку
+                    telegramContact = `<a href="https://t.me/${player.telegram_username}" class="telegram-username" target="_blank">@${player.telegram_username}</a>`;
+                } else {
+                    // Если нет username - показываем ссылку по telegram_id
+                    telegramContact = `<a href="tg://user?id=${player.telegram_id}" class="telegram-username">Написать в Telegram</a>`;
+                }
 
-                // Отображение временных слотов (если есть)
-                const timeSlotsHTML = player.time_slots && player.time_slots.length > 0 
-                    ? `<div class="info-row">
-                        <span class="info-icon">⏰</span>
-                        <span class="info-label">Время:</span>
-                        <span class="info-value">${player.time_slots.map(slot => timeSlotNames[slot] || slot).join(', ')}</span>
-                    </div>`
-                    : '';
+                // Отображение временных слотов
+                let statusHTML = '';
+                if (player.time_slots && player.time_slots.length > 0) {
+                    // Показываем временные слоты вместо "Готов к игре"
+                    const slotsText = player.time_slots.map(slot => timeSlotNames[slot] || slot).join(', ');
+                    statusHTML = `
+                        <div class="online-indicator">
+                            <div class="pulse-dot"></div>
+                            <span style="color: #00c896; font-weight: 600;">${slotsText}</span>
+                        </div>
+                    `;
+                } else {
+                    // Если слотов нет - показываем просто "Готов к игре"
+                    statusHTML = `
+                        <div class="online-indicator">
+                            <div class="pulse-dot"></div>
+                            <span style="color: #00c896; font-weight: 600;">Готов к игре</span>
+                        </div>
+                    `;
+                }
 
                 return `
                     <div class="player-card">
@@ -506,18 +524,15 @@
                             <div class="info-row">
                                 <span class="info-icon">💬</span>
                                 <span class="info-label">Telegram:</span>
-                                ${telegramLink}
+                                ${telegramContact}
                             </div>
-                            ${timeSlotsHTML}
                             <div class="roles-container">
                                 <div class="roles-label">Роли:</div>
                                 <div class="roles-tags">
                                     ${rolesHTML}
                                 </div>
                             </div>
-                            <div class="online-indicator">
-                                <div class="pulse-dot"></div>
-                                <span style="color: #00c896; font-weight: 600;">Готов к игре</span>
+                            ${statusHTML}
                             </div>
                         </div>
                     </div>
