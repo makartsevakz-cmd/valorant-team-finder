@@ -79,7 +79,7 @@ def get_main_menu_keyboard():
     """Главное меню"""
     keyboard = [
         [InlineKeyboardButton("🎮 Мой план на сегодня", callback_data="play_today_slots")],
-        [InlineKeyboardButton("👥 Кто играет сегодня?", url="https://baby-tracker-ecru.vercel.app")],
+        [InlineKeyboardButton("👥 Кто играет сегодня?", url="https://valorant-team-finder-ten.vercel.app/")],
         [InlineKeyboardButton("⚙️ Изменить данные", callback_data="edit_profile")],
     ]
     return InlineKeyboardMarkup(keyboard)
