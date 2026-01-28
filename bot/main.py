@@ -78,9 +78,8 @@ def run_http_server():
 def get_main_menu_keyboard():
     """Главное меню"""
     keyboard = [
-        [InlineKeyboardButton("🎮 Буду играть сегодня", callback_data="play_today_slots")],
-        [InlineKeyboardButton("📝 Изменить план на сегодня", callback_data="change_plan")],
-        [InlineKeyboardButton("👥 Кто играет сегодня?", url="https://valorant-team-finder-ten.vercel.app/")],
+        [InlineKeyboardButton("🎮 Мой план на сегодня", callback_data="play_today_slots")],
+        [InlineKeyboardButton("👥 Кто играет сегодня?", url="https://baby-tracker-ecru.vercel.app")],
         [InlineKeyboardButton("⚙️ Изменить данные", callback_data="edit_profile")],
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -309,17 +308,32 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ======================
 
 async def play_today_slots(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Начало выбора временных слотов"""
+    """Начало выбора временных слотов (или изменение существующих)"""
     query = update.callback_query
     await query.answer()
     
-    # Инициализируем выбранные слоты
-    context.user_data['selected_slots'] = []
+    user = update.effective_user
+    telegram_id = user.id
+    today = datetime.now().date().isoformat()
+    
+    # Получаем текущий план
+    current_status = database.get_daily_status(telegram_id, today)
+    current_slots = current_status.get('time_slots', []) if current_status else []
+    
+    # Инициализируем выбранные слоты текущим планом
+    context.user_data['selected_slots'] = current_slots.copy()
+    
+    # Формируем сообщение
+    if current_slots:
+        slots_text = ", ".join([TIME_SLOTS_RU[s] for s in current_slots])
+        message = f"📝 Ваш текущий план на сегодня:\n{slots_text}\n\n"
+        message += "🎮 Измените или подтвердите время игры:"
+    else:
+        message = "🎮 Выбери время когда будешь играть сегодня\n(можно выбрать несколько):"
     
     await query.edit_message_text(
-        "🎮 Выбери время когда будешь играть сегодня\n"
-        "(можно выбрать несколько):",
-        reply_markup=get_time_slots_keyboard([])
+        message,
+        reply_markup=get_time_slots_keyboard(current_slots)
     )
 
 
@@ -374,7 +388,7 @@ async def confirm_slots(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     # Получаем других игроков в эти же слоты
-    teammates = database.get_players_by_slots(today, selected_slots, limit=3, exclude_id=telegram_id)
+    teammates = database.get_players_by_slots(today, selected_slots, limit=5, exclude_id=telegram_id)
     
     # Формируем сообщение
     slots_text = ", ".join([TIME_SLOTS_RU[s] for s in selected_slots])
@@ -384,14 +398,24 @@ async def confirm_slots(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message += f"Сегодня вы будете играть {slots_text}"
     
     if teammates:
-        teammates_mentions = [f"@{t['valorant_nick']}" for t in teammates[:3]]
-        message += f"\n\nВ это же время с вами будут играть:\n{' '.join(teammates_mentions)}"
+        message += "\n\n👥 В это же время с вами будут играть:\n"
+        for teammate in teammates[:5]:
+            # Используем telegram username если есть, иначе создаём ссылку по ID
+            if teammate.get('telegram_username'):
+                telegram_link = f"@{teammate['telegram_username']}"
+            else:
+                # Создаём кликабельную ссылку через tg://user?id=
+                telegram_link = f"[{teammate['telegram_first_name']}](tg://user?id={teammate['telegram_id']})"
+            
+            valorant_nick = teammate['valorant_nick']
+            message += f"• {telegram_link} ({valorant_nick})\n"
     else:
         message += "\n\n🔍 Пока никто больше не планирует играть в это время"
     
     await query.edit_message_text(
         message,
-        reply_markup=get_main_menu_keyboard()
+        reply_markup=get_main_menu_keyboard(),
+        parse_mode='Markdown'
     )
 
 
@@ -722,8 +746,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await cancel_slots(update, context)
     elif data == "not_playing":
         await not_playing_today(update, context)
-    elif data == "change_plan":
-        await change_plan(update, context)
     elif data == "edit_profile":
         await edit_profile(update, context)
     elif data == "edit_nick":
@@ -869,9 +891,11 @@ def main():
     try:
         job_queue = application.job_queue
         if job_queue:
-            job_queue.run_daily(send_daily_notification, time=time(10, 0, 0))
-            job_queue.run_daily(send_daily_notification, time=time(18, 0, 0))
-            logger.info("Ежедневные уведомления настроены на 10:00 и 18:00")
+            # Устанавливаем время в UTC (10:00 UTC = 13:00 MSK, 18:00 UTC = 21:00 MSK)
+            # Если нужно 10:00 и 18:00 по Москве, то в UTC это 07:00 и 15:00
+            job_queue.run_daily(send_daily_notification, time=time(7, 0, 0))  # 10:00 MSK
+            job_queue.run_daily(send_daily_notification, time=time(15, 0, 0))  # 18:00 MSK
+            logger.info("Ежедневные уведомления настроены на 10:00 и 18:00 МСК (7:00 и 15:00 UTC)")
         else:
             logger.warning("JobQueue недоступен. Ежедневные уведомления отключены.")
     except Exception as e:
