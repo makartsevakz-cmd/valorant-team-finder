@@ -829,7 +829,7 @@ async def send_daily_notification(context: ContextTypes.DEFAULT_TYPE):
             
             await context.bot.send_message(
                 chat_id=telegram_id,
-                text=f"🌅 Доброе утро, {player['valorant_nick']}!\n\n"
+                text=f"🌅 Привет, {player['valorant_nick']}!\n\n"
                      "Будешь играть в VALORANT сегодня?",
                 reply_markup=reply_markup
             )
